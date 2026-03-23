@@ -4,8 +4,7 @@ import { workingDir } from './module.cfg-loader';
 import path from 'path';
 import * as reqModule from './module.fetch';
 import Playready from 'node-playready';
-import { Widevine, DeviceType } from 'widevine';
-import { KeyContainer, LicenseType } from 'widevine';
+import { Widevine, DeviceType, KeyContainer, LicenseType } from 'widevine';
 
 const req = new reqModule.Req();
 
@@ -14,36 +13,40 @@ let widevine: any | undefined, playready: Playready | undefined;
 export let cdm: 'widevine' | 'playready';
 export let canDecrypt: boolean;
 try {
-	const files_prd = fs.readdirSync(path.join(workingDir, 'playready'));
-	const bgroup_file_found = files_prd.find((f) => f.includes('bgroupcert'));
-	const zgpriv_file_found = files_prd.find((f) => f.includes('zgpriv'));
-	const prd_file_found = files_prd.find((f) => f.endsWith('.prd'));
-	try {
-		const file_bgroup = path.join(workingDir, 'playready', 'bgroupcert.dat');
-		const file_zgpriv = path.join(workingDir, 'playready', 'zgpriv.dat');
+	const playready_dir = path.join(workingDir, 'playready');
 
-		if (bgroup_file_found && zgpriv_file_found) {
-			const bgroup_stats = fs.statSync(file_bgroup);
-			const zgpriv_stats = fs.statSync(file_zgpriv);
+	if (fs.existsSync(playready_dir)) {
+		const files_prd = fs.readdirSync(playready_dir);
+		const bgroup_file_found = files_prd.find((f) => f.includes('bgroupcert'));
+		const zgpriv_file_found = files_prd.find((f) => f.includes('zgpriv'));
+		const prd_file_found = files_prd.find((f) => f.endsWith('.prd'));
+		try {
+			const file_bgroup = path.join(workingDir, 'playready', 'bgroupcert.dat');
+			const file_zgpriv = path.join(workingDir, 'playready', 'zgpriv.dat');
 
-			// Zgpriv is always 32 bytes long
-			if (bgroup_stats.isFile() && zgpriv_stats.isFile() && zgpriv_stats.size === 32) {
-				const bgroup = fs.readFileSync(file_bgroup);
-				const zgpriv = fs.readFileSync(file_zgpriv);
+			if (bgroup_file_found && zgpriv_file_found) {
+				const bgroup_stats = fs.statSync(file_bgroup);
+				const zgpriv_stats = fs.statSync(file_zgpriv);
 
-				// Init Playready Client
-				playready = Playready.init(bgroup, zgpriv);
+				// Zgpriv is always 32 bytes long
+				if (bgroup_stats.isFile() && zgpriv_stats.isFile() && zgpriv_stats.size === 32) {
+					const bgroup = fs.readFileSync(file_bgroup);
+					const zgpriv = fs.readFileSync(file_zgpriv);
+
+					// Init Playready Client
+					playready = Playready.init(bgroup, zgpriv);
+				}
+			} else if (prd_file_found) {
+				const file_prd = path.join(workingDir, 'playready', prd_file_found);
+				const prd = fs.readFileSync(file_prd);
+
+				// Init Playready Client with PRD file
+				playready = Playready.initPRD(prd);
 			}
-		} else if (prd_file_found) {
-			const file_prd = path.join(workingDir, 'playready', prd_file_found);
-			const prd = fs.readFileSync(file_prd);
-
-			// Init Playready Client with PRD file
-			playready = Playready.initPRD(prd);
+		} catch (e) {
+			console.error('Error loading Playready CDM. For more informations read the readme.');
+			console.error(e);
 		}
-	} catch (e) {
-		console.error('Error loading Playready CDM. For more informations read the readme.');
-		console.error(e);
 	}
 
 	const widevineDir = path.join(workingDir, 'widevine');
@@ -87,12 +90,12 @@ try {
 
 			// Error if no client blob but private key
 			if (identifierBlob.length === 0 && privateKey.length !== 0 && wvd.length === 0) {
-				process.stdout.write('[CDM] Widevine initialization failed, found private key but not the client id blob!\n');
+				console.error('Widevine initialization failed, found private key but not the client id blob!');
 			}
 
 			// Error if no private key but client blob
 			if (identifierBlob.length !== 0 && privateKey.length === 0 && wvd.length === 0) {
-				process.stdout.write('[CDM] Widevine initialization failed, found client id blob but not the private key!\n');
+				console.error('Widevine initialization failed, found client id blob but not the private key!');
 			}
 
 			// Init Widevine Client
@@ -106,7 +109,7 @@ try {
 				process.stdout.write('[CDM] Widevine WVD initialized successfully.\n');
 			}
 		} catch (e) {
-			process.stdout.write('Error loading Widevine CDM, malformed client blob or private key.\n');
+			console.error('Error loading Widevine CDM, malformed client blob or private key.');
 			console.error(e);
 		}
 	} else {
