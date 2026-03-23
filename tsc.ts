@@ -68,13 +68,13 @@ export { ignore };
 	if (!isTest && isGUI) {
 		process.stdout.write('✓\nBuilding react... ');
 
-		const installReactDependencies = exec('pnpm install', {
+		const installReactDependencies = exec('npm install', {
 			cwd: path.join(__dirname, 'gui', 'react')
 		});
 
 		await waitForProcess(installReactDependencies);
 
-		const react = exec('pnpm run build', {
+		const react = exec('npm run build', {
 			cwd: path.join(__dirname, 'gui', 'react'),
 			env: {
 				...process.env,
@@ -102,7 +102,7 @@ export { ignore };
 
 	process.stdout.write('✓\nInstalling dependencies... ');
 	if (!isTest) {
-		const dependencies = exec(`pnpm install ${isGUI ? '' : '-P'}`, {
+		const dependencies = exec(`npm install ${isGUI ? '' : '--omit=dev'}`, {
 			cwd: path.join(__dirname, 'lib')
 		});
 		await waitForProcess(dependencies);

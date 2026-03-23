@@ -157,6 +157,12 @@ const loadBinCfg = async () => {
 		if (!Object.prototype.hasOwnProperty.call(binCfg, dir) || typeof binCfg[dir] != 'string') {
 			binCfg[dir] = defaultBin[dir];
 		}
+		
+		// Remove .exe extension if on Linux/Docker and it was mounted from Windows config
+		if (process.platform !== 'win32' && (binCfg[dir] as string).toLowerCase().endsWith('.exe')) {
+			binCfg[dir] = (binCfg[dir] as string).slice(0, -4);
+		}
+
 		if ((binCfg[dir] as string).match(/^\${wdir}/)) {
 			binCfg[dir] = (binCfg[dir] as string).replace(/^\${wdir}/, '');
 			binCfg[dir] = path.join(workingDir, binCfg[dir] as string);

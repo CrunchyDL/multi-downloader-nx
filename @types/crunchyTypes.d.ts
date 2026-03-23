@@ -53,6 +53,8 @@ export type CrunchyDownloadOptions = {
 	scaledBorderAndShadow: 'yes' | 'no';
 	originalScriptFix: boolean;
 	subtitleTimestampFix: boolean;
+	threads?: number;
+	preset?: string;
 };
 
 export type CrunchyMultiDownload = {

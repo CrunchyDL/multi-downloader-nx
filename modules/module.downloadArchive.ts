@@ -157,9 +157,63 @@ const makeCommand = (service: 'crunchy' | 'hidive' | 'adn'): Partial<ArgvType>[]
 	return ret;
 };
 
-const loadData = (): DataType => {
-	if (fs.existsSync(archiveFile)) return JSON.parse(fs.readFileSync(archiveFile).toString()) as DataType;
-	return {} as DataType;
+const isEpisodeDownloaded = (
+	kind:
+		| { service: 'crunchy'; type: 's' | 'srz' }
+		| { service: 'hidive'; type: 's' }
+		| { service: 'adn'; type: 's' },
+	ID: string,
+	episode: string
+): boolean => {
+	const data = loadData() as any;
+	if (!data[kind.service] || !data[kind.service][kind.type]) return false;
+	const items = data[kind.service][kind.type] as ItemType;
+	const item = items.find((a) => a.id === ID);
+	return item ? item.already.includes(episode) : false;
 };
 
-export { addToArchive, downloaded, makeCommand };
+const toggleDownloaded = (
+	kind:
+		| { service: 'crunchy'; type: 's' | 'srz' }
+		| { service: 'hidive'; type: 's' }
+		| { service: 'adn'; type: 's' },
+	ID: string,
+	episode: string,
+	forceState?: boolean
+) => {
+	const data = loadData() as any;
+	if (!data[kind.service]) {
+		if (forceState === false) return;
+		addToArchive(kind, ID);
+	}
+	
+	const items = data[kind.service][kind.type] as ItemType;
+	let item = items.find((a) => a.id === ID);
+	
+	if (!item) {
+		if (forceState === false) return;
+		items.push({ id: ID, already: [episode] });
+	} else {
+		const index = item.already.indexOf(episode);
+		if (index >= 0) {
+			if (forceState === true) return;
+			item.already.splice(index, 1);
+		} else {
+			if (forceState === false) return;
+			item.already.push(episode);
+		}
+	}
+	
+	fs.writeFileSync(archiveFile, JSON.stringify(data, null, 4));
+};
+
+const loadData = (): DataType => {
+	if (fs.existsSync(archiveFile)) return JSON.parse(fs.readFileSync(archiveFile).toString()) as DataType;
+	return {
+		crunchy: { s: [], srz: [] },
+		hidive: { s: [] },
+		adn: { s: [] }
+	} as DataType;
+};
+
+export { addToArchive, downloaded, makeCommand, isEpisodeDownloaded, toggleDownloaded };

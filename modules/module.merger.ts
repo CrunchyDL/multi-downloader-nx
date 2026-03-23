@@ -51,6 +51,8 @@ export type MergerOptions = {
 	options: {
 		ffmpeg: string[];
 		mkvmerge: string[];
+		threads?: number;
+		preset?: string;
 	};
 	defaults: {
 		audio: LanguageItem;
@@ -120,7 +122,7 @@ class Merger {
 	}
 
 	public FFmpeg(): string {
-		const args: string[] = [];
+		const args: string[] = ['-y', '-nostdin'];
 		const metaData: string[] = [];
 
 		let index = 0;
@@ -188,11 +190,32 @@ class Merger {
 			}
 		}
 
+		const hasAudioConfig = this.options.options.ffmpeg.some(a => a.includes('-c:a') || a.includes('-codec:a'));
+		const hasVideoConfig = this.options.options.ffmpeg.some(a => a.includes('-c:v') || a.includes('-codec:v'));
+
 		args.push(...metaData);
 		args.push(...this.options.subtitles.map((_, subIndex) => `-map ${subIndex + index}`));
+
+		// Set dispositions (default tracks)
+		this.options.onlyAudio.forEach((aud, audIndex) => {
+			if (this.options.defaults.audio.code === aud.lang.code) {
+				args.push(`-disposition:a:${audIndex} default`);
+			} else {
+				args.push(`-disposition:a:${audIndex} 0`);
+			}
+		});
+
+		this.options.subtitles.forEach((sub, subIndex) => {
+			if (this.options.defaults.sub.code === sub.language.code && !sub.closedCaption) {
+				args.push(`-disposition:s:${subIndex} default`);
+			} else {
+				args.push(`-disposition:s:${subIndex} 0`);
+			}
+		});
+
 		args.push(
-			'-c:v copy',
-			'-c:a copy',
+			hasVideoConfig ? '' : '-c:v copy',
+			hasAudioConfig ? '' : '-c:a copy',
 			this.options.output.split('.').pop()?.toLowerCase() === 'mp4' ? '-c:s mov_text' : '-c:s ass',
 			...this.options.subtitles.map(
 				(sub, subindex) =>
@@ -202,6 +225,10 @@ class Merger {
 			)
 		);
 		args.push(...this.options.options.ffmpeg);
+		if (this.options.options.preset) {
+			args.push(`-preset ${this.options.options.preset}`);
+		}
+		args.push(`-threads ${this.options.options.threads ?? 0}`);
 		args.push(`"${this.options.output}"`);
 		return args.join(' ');
 	}
@@ -409,8 +436,15 @@ class Merger {
 			console.warn('Unable to merge files.');
 			return;
 		}
+
+		// Ensure output directory exists
+		const outputDir = path.dirname(this.options.output);
+		if (!fs.existsSync(outputDir)) {
+			fs.mkdirSync(outputDir, { recursive: true });
+		}
+
 		console.info(`[${type}] Started merging`);
-		const res = Helper.exec(type, `"${bin}"`, command);
+		const res = await Helper.exec(type, bin, command);
 		if (!res.isOk && type === 'mkvmerge' && res.err.code === 1) {
 			console.info(`[${type}] Mkvmerge finished with at least one warning`);
 		} else if (!res.isOk) {

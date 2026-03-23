@@ -99,6 +99,9 @@ export let argvC: {
 	// Proxy
 	proxy: string;
 	proxyAll: boolean;
+	audioPriority: string[];
+	subtitlePriority: string[];
+	preset: string;
 };
 
 export type ArgvType = typeof argvC;

@@ -527,6 +527,30 @@ const args: TAppArg<boolean | number | string | unknown[]>[] = [
 		usage: '${dub1} ${dub2}'
 	},
 	{
+		name: 'audioPriority',
+		describe: 'Set the audio priority list',
+		docDescribe: 'Set the audio priority list for default track and fallbacks (comma or space separated)',
+		group: 'dl',
+		service: ['crunchy', 'hidive'],
+		type: 'array',
+		usage: '${langs}',
+		default: {
+			default: ['jpn', 'eng', 'spa-ES', 'spa']
+		}
+	},
+	{
+		name: 'subtitlePriority',
+		describe: 'Set the subtitle priority list',
+		docDescribe: 'Set the subtitle priority list for default track (comma or space separated)',
+		group: 'dl',
+		service: ['crunchy', 'hidive'],
+		type: 'array',
+		usage: '${langs}',
+		default: {
+			default: ['en-US', 'es-419', 'es-ES']
+		}
+	},
+	{
 		name: 'all',
 		describe: 'Used to download all episodes from the show',
 		docDescribe: true,
@@ -721,6 +745,19 @@ const args: TAppArg<boolean | number | string | unknown[]>[] = [
 		usage: ''
 	},
 	{
+		name: 'preset',
+		group: 'mux',
+		describe: 'Set the x264/x265 encoding preset',
+		docDescribe: 'Set the encoding preset for x264 or x265 (ultrafast, medium, slow, etc.)',
+		choices: ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow', 'placebo'],
+		default: {
+			default: 'fast'
+		},
+		type: 'string',
+		service: ['all'],
+		usage: '${preset}'
+	},
+	{
 		name: 'help',
 		alias: 'h',
 		describe: 'Show the help output',
@@ -811,6 +848,18 @@ const args: TAppArg<boolean | number | string | unknown[]>[] = [
 		usage: '${amount}',
 		default: {
 			default: 10
+		}
+	},
+	{
+		name: 'threads',
+		group: 'mux',
+		describe: 'Set the number of threads for FFmpeg. Use 0 for auto.',
+		docDescribe: true,
+		service: ['all'],
+		type: 'number',
+		usage: '${threads}',
+		default: {
+			default: 0
 		}
 	},
 	{

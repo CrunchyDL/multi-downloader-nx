@@ -80,7 +80,7 @@ export default class Hidive implements ServiceClass {
 			if (selected.isOk && selected.showData) {
 				for (const select of selected.value) {
 					//download episode
-					if (!(await this.downloadEpisode(select, { ...argv }))) {
+					if (!(await this.downloadEpisode(select, { ...argv, threads: argv.threads as number }))) {
 						console.error(`Unable to download selected episode ${select.episodeInformation.episodeNumber}`);
 						return false;
 					}
@@ -92,7 +92,7 @@ export default class Hidive implements ServiceClass {
 			if (selected.isOk && selected.showData) {
 				for (const select of selected.value) {
 					//download episode
-					if (!(await this.downloadEpisode(select, { ...argv }))) {
+					if (!(await this.downloadEpisode(select, { ...argv, threads: argv.threads as number }))) {
 						console.error(`Unable to download selected episode ${select.episodeInformation.episodeNumber}`);
 						return false;
 					}
@@ -101,7 +101,7 @@ export default class Hidive implements ServiceClass {
 		} else if (argv.new) {
 			console.error('--new is not yet implemented in the new API');
 		} else if (argv.e) {
-			if (!(await this.downloadSingleEpisode(parseInt(argv.e), { ...argv }))) {
+			if (!(await this.downloadSingleEpisode(parseInt(argv.e), { ...argv, threads: argv.threads as number }))) {
 				console.error(`Unable to download selected episode ${argv.e}`);
 				return false;
 			}
@@ -838,6 +838,16 @@ export default class Hidive implements ServiceClass {
 			}
 		}
 		if (chosenAudios.length == 0) {
+			const argv = yargs.appArgv(this.cfg.cli);
+			const audioPriority = (argv.audioPriority as any as string[]) || ['eng', 'jpn', 'spa-ES', 'spa'];
+			for (const prio of audioPriority) {
+				if (audioByLanguage[prio]) {
+					chosenAudios.push(audioByLanguage[prio][0]);
+					break;
+				}
+			}
+		}
+		if (chosenAudios.length == 0) {
 			console.error(`Chosen audio language(s) does not exist for episode ${selectedEpisode.episodeInformation.episodeNumber}`);
 			return undefined;
 		}
@@ -910,17 +920,17 @@ export default class Hidive implements ServiceClass {
 					}
 					if (this.cfg.bin.mp4decrypt || this.cfg.bin.shaka) {
 						let commandBase = `--show-progress --key ${encryptionKeys[0].kid}:${encryptionKeys[0].key} `;
-						let commandVideo = commandBase + `"${tempTsFile}.video.enc.m4s" "${tempTsFile}.video.m4s"`;
+						let commandVideo = commandBase + `${tempTsFile}.video.enc.m4s ${tempTsFile}.video.m4s`;
 
 						if (this.cfg.bin.shaka) {
 							commandBase = ` --enable_raw_key_decryption ${encryptionKeys.map((kb) => '--keys key_id=' + kb.kid + ':key=' + kb.key).join(' ')}`;
-							commandVideo = `input="${tempTsFile}.video.enc.m4s",stream=video,output="${tempTsFile}.video.m4s"` + commandBase;
+							commandVideo = `input=${tempTsFile}.video.enc.m4s,stream=video,output=${tempTsFile}.video.m4s` + commandBase;
 						}
 
 						console.info('Started decrypting video,', this.cfg.bin.shaka ? 'using shaka' : 'using mp4decrypt');
-						const decryptVideo = Helper.exec(
+						const decryptVideo = await Helper.exec(
 							this.cfg.bin.shaka ? 'shaka-packager' : 'mp4decrypt',
-							this.cfg.bin.shaka ? `"${this.cfg.bin.shaka}"` : `"${this.cfg.bin.mp4decrypt}"`,
+							(this.cfg.bin.shaka ? this.cfg.bin.shaka : this.cfg.bin.mp4decrypt)!,
 							commandVideo
 						);
 						if (!decryptVideo.isOk) {
@@ -1005,17 +1015,17 @@ export default class Hidive implements ServiceClass {
 					}
 					if (this.cfg.bin.mp4decrypt || this.cfg.bin.shaka) {
 						let commandBase = `--show-progress --key ${encryptionKeys[0].kid}:${encryptionKeys[0].key} `;
-						let commandAudio = commandBase + `"${tempTsFile}.audio.enc.m4s" "${tempTsFile}.audio.m4s"`;
+						let commandAudio = commandBase + `${tempTsFile}.audio.enc.m4s ${tempTsFile}.audio.m4s`;
 
 						if (this.cfg.bin.shaka) {
 							commandBase = ` --enable_raw_key_decryption ${encryptionKeys.map((kb) => '--keys key_id=' + kb.kid + ':key=' + kb.key).join(' ')}`;
-							commandAudio = `input="${tempTsFile}.audio.enc.m4s",stream=audio,output="${tempTsFile}.audio.m4s"` + commandBase;
+							commandAudio = `input=${tempTsFile}.audio.enc.m4s,stream=audio,output=${tempTsFile}.audio.m4s` + commandBase;
 						}
 
 						console.info('Started decrypting audio');
-						const decryptAudio = Helper.exec(
+						const decryptAudio = await Helper.exec(
 							this.cfg.bin.shaka ? 'shaka-packager' : 'mp4decrypt',
-							this.cfg.bin.shaka ? `"${this.cfg.bin.shaka}"` : `"${this.cfg.bin.mp4decrypt}"`,
+							(this.cfg.bin.shaka ? this.cfg.bin.shaka : this.cfg.bin.mp4decrypt)!,
 							commandAudio
 						);
 						if (!decryptAudio.isOk) {
@@ -1132,6 +1142,29 @@ export default class Hidive implements ServiceClass {
 		if (data.some((a) => a.type === 'Audio')) {
 			hasAudioStreams = true;
 		}
+
+		const argv = yargs.appArgv(this.cfg.cli);
+		const audioPriority = (argv.audioPriority as any as string[]) || ['eng', 'jpn', 'spa-ES', 'spa'];
+		const subtitlePriority = (argv.subtitlePriority as any as string[]) || ['en-US', 'es-419', 'es-ES'];
+
+		let defaultAudio = options.defaultAudio;
+		for (const prio of audioPriority) {
+			const found = data.find(a => a.type === 'Audio' && (a as any).lang.code === prio);
+			if (found && found.type === 'Audio') {
+				defaultAudio = found.lang;
+				break;
+			}
+		}
+
+		let defaultSub = options.defaultSub;
+		for (const prio of subtitlePriority) {
+			const found = data.find(a => a.type === 'Subtitle' && ((a as any).language.locale === prio || (a as any).language.new_hd_locale === prio));
+			if (found && found.type === 'Subtitle') {
+				defaultSub = found.language;
+				break;
+			}
+		}
+
 		const merger = new Merger({
 			onlyVid: hasAudioStreams
 				? data
@@ -1191,11 +1224,13 @@ export default class Hidive implements ServiceClass {
 			videoTitle: options.videoTitle,
 			options: {
 				ffmpeg: options.ffmpegOptions,
-				mkvmerge: options.mkvmergeOptions
+				mkvmerge: options.mkvmergeOptions,
+				threads: options.threads,
+				preset: options.preset
 			},
 			defaults: {
-				audio: options.defaultAudio,
-				sub: options.defaultSub
+				audio: defaultAudio,
+				sub: defaultSub
 			},
 			ccTag: options.ccTag
 		});

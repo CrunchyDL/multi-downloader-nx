@@ -86,7 +86,7 @@ export default class AnimationDigitalNetwork implements ServiceClass {
 			const selected = await this.selectShow(parseInt(argv.s), argv.e, argv.but, argv.all);
 			if (selected.isOk) {
 				for (const select of selected.value) {
-					if (!(await this.getEpisode(select, { ...argv, skipsubs: false }))) {
+					if (!(await this.getEpisode(select, { ...argv, skipsubs: false, threads: argv.threads as number }))) {
 						console.error(`Unable to download selected episode ${select.shortNumber}`);
 						return false;
 					}
@@ -399,7 +399,9 @@ export default class AnimationDigitalNetwork implements ServiceClass {
 			videoTitle: options.videoTitle,
 			options: {
 				ffmpeg: options.ffmpegOptions,
-				mkvmerge: options.mkvmergeOptions
+				mkvmerge: options.mkvmergeOptions,
+				threads: options.threads as number,
+				preset: options.preset
 			},
 			defaults: {
 				audio: options.defaultAudio,

@@ -4,12 +4,13 @@ import { workingDir } from './module.cfg-loader';
 import path from 'path';
 import * as reqModule from './module.fetch';
 import Playready from 'node-playready';
-import Widevine, { KeyContainer, LicenseType } from 'widevine';
+import { Widevine, DeviceType } from 'widevine';
+import { KeyContainer, LicenseType } from 'widevine';
 
 const req = new reqModule.Req();
 
 //read cdm files located in the same directory
-let widevine: Widevine | undefined, playready: Playready | undefined;
+let widevine: any | undefined, playready: Playready | undefined;
 export let cdm: 'widevine' | 'playready';
 export let canDecrypt: boolean;
 try {
@@ -45,54 +46,71 @@ try {
 		console.error(e);
 	}
 
-	const files_wvd = fs.readdirSync(path.join(workingDir, 'widevine'));
-	try {
-		let identifierBlob: Buffer = Buffer.from([]);
-		let privateKey: Buffer = Buffer.from([]);
-		let wvd: Buffer = Buffer.from([]);
+	const widevineDir = path.join(workingDir, 'widevine');
+	if (fs.existsSync(widevineDir)) {
+		const files_wvd = fs.readdirSync(widevineDir);
+		try {
+			let identifierBlob: Buffer = Buffer.from([]);
+			let privateKey: Buffer = Buffer.from([]);
+			let wvd: Buffer = Buffer.from([]);
 
-		// Searching files for client id blob and private key
-		files_wvd.forEach(function (file) {
-			file = path.join(workingDir, 'widevine', file);
-			const stats = fs.statSync(file);
-			if (stats.size < 1024 * 8 && stats.isFile()) {
-				const fileContents = fs.readFileSync(file, { encoding: 'utf8' });
-				// Handle client id blob
-				if (fileContents.includes('widevine_cdm_version') && fileContents.includes('oem_crypto_security_patch_level') && !fileContents.startsWith('WVD')) {
-					identifierBlob = fs.readFileSync(file);
+			// Searching files for client id blob and private key
+			files_wvd.forEach(function (file) {
+				const fullPath = path.join(widevineDir, file);
+				const stats = fs.statSync(fullPath);
+				if (stats.size < 1024 * 8 && stats.isFile()) {
+					const buf = fs.readFileSync(fullPath);
+					process.stdout.write(`[CDM] Inspecting file: ${file} (size: ${stats.size} bytes)\n`);
+					
+					// Handle client id blob
+					if (buf.includes(Buffer.from('widevine_cdm_version')) && buf.includes(Buffer.from('oem_crypto_security_patch_level')) && !buf.subarray(0, 3).equals(Buffer.from('WVD'))) {
+						process.stdout.write(`[CDM] -> MATCHED as identifier blob: ${file}\n`);
+						identifierBlob = buf;
+					}
+					// Handle private key
+					if (
+						(buf.includes(Buffer.from('-----BEGIN RSA PRIVATE KEY-----')) && buf.includes(Buffer.from('-----END RSA PRIVATE KEY-----'))) ||
+						(buf.includes(Buffer.from('-----BEGIN PRIVATE KEY-----')) && buf.includes(Buffer.from('-----END PRIVATE KEY-----')))
+					) {
+						process.stdout.write(`[CDM] -> MATCHED as private key: ${file}\n`);
+						privateKey = buf;
+					}
+					// Handle WVD file
+					if (buf.subarray(0, 3).equals(Buffer.from('WVD'))) {
+						process.stdout.write(`[CDM] -> MATCHED as WVD file: ${file}\n`);
+						wvd = buf;
+					}
+				} else {
+					process.stdout.write(`[CDM] Skipping non-file or large file: ${file}\n`);
 				}
-				// Handle private key
-				if (
-					(fileContents.includes('-----BEGIN RSA PRIVATE KEY-----') && fileContents.includes('-----END RSA PRIVATE KEY-----')) ||
-					(fileContents.includes('-----BEGIN PRIVATE KEY-----') && fileContents.includes('-----END PRIVATE KEY-----'))
-				) {
-					privateKey = fs.readFileSync(file);
-				}
-				// Handle WVD file
-				if (fileContents.startsWith('WVD')) {
-					wvd = fs.readFileSync(file);
-				}
+			});
+
+			// Error if no client blob but private key
+			if (identifierBlob.length === 0 && privateKey.length !== 0 && wvd.length === 0) {
+				process.stdout.write('[CDM] Widevine initialization failed, found private key but not the client id blob!\n');
 			}
-		});
 
-		// Error if no client blob but private key
-		if (identifierBlob.length === 0 && privateKey.length !== 0 && wvd.length === 0) {
-			console.error('Widevine initialization failed, found private key but not the client id blob!');
-		}
+			// Error if no private key but client blob
+			if (identifierBlob.length !== 0 && privateKey.length === 0 && wvd.length === 0) {
+				process.stdout.write('[CDM] Widevine initialization failed, found client id blob but not the private key!\n');
+			}
 
-		// Error if no private key but client blob
-		if (identifierBlob.length !== 0 && privateKey.length === 0 && wvd.length === 0) {
-			console.error('Widevine initialization failed, found client id blob but not the private key!');
+			// Init Widevine Client
+			if (identifierBlob.length !== 0 && privateKey.length !== 0) {
+				process.stdout.write('[CDM] Initializing Widevine with blobs...\n');
+				widevine = Widevine.init(identifierBlob, privateKey, DeviceType.ANDROID);
+				process.stdout.write('[CDM] Widevine initialized successfully.\n');
+			} else if (wvd.length !== 0) {
+				process.stdout.write('[CDM] Initializing Widevine with WVD file...\n');
+				widevine = Widevine.initWVD(wvd);
+				process.stdout.write('[CDM] Widevine WVD initialized successfully.\n');
+			}
+		} catch (e) {
+			process.stdout.write('Error loading Widevine CDM, malformed client blob or private key.\n');
+			console.error(e);
 		}
-
-		// Init Widevine Client
-		if (identifierBlob.length !== 0 && privateKey.length !== 0) {
-			widevine = Widevine.init(identifierBlob, privateKey);
-		} else if (wvd.length !== 0) {
-			widevine = Widevine.initWVD(wvd);
-		}
-	} catch (e) {
-		console.error('Error loading Widevine CDM, malformed client blob or private key.');
+	} else {
+		process.stdout.write(`[CDM] Widevine directory not found: ${widevineDir}\n`);
 	}
 
 	if (widevine) {

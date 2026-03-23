@@ -52,34 +52,59 @@ export default class Helper {
 		fpath: string,
 		pargs: string,
 		spc = false
-	):
-		| {
-				isOk: true;
-		  }
-		| {
-				isOk: false;
-				err: Error & { code: number };
-		  } {
-		pargs = pargs ? ' ' + pargs : '';
-		console.info(`\n> "${pname}"${pargs}${spc ? '\n' : ''}`);
-		try {
-			if (process.platform === 'win32') {
-				childProcess.execSync('& ' + fpath + pargs, { stdio: 'inherit', shell: 'powershell.exe', windowsHide: true });
-			} else {
-				childProcess.execSync(fpath + pargs, { stdio: 'inherit' });
-			}
-			return {
-				isOk: true
+	): Promise<{ isOk: true } | { isOk: false; err: Error & { code: number } }> {
+		const fullCommand = pargs ? ' ' + pargs : '';
+		console.info(`\n> "${pname}"${fullCommand}${spc ? '\n' : ''}`);
+		
+		return new Promise((resolve) => {
+			const options: any = { 
+				stdio: ['ignore', 'pipe', 'pipe'],
+				windowsHide: true
 			};
-		} catch (er) {
-			const err = er as Error & { status: number };
-			return {
-				isOk: false,
-				err: {
-					...err,
-					code: err.status
+			
+			let child: childProcess.ChildProcess;
+			if (process.platform === 'win32') {
+				child = childProcess.spawn('powershell.exe', ['-Command', `& "${fpath}"${fullCommand}`], options);
+			} else {
+				child = childProcess.spawn(fpath, pargs ? splitArgs(pargs) : [], options);
+			}
+
+			child.stdout?.on('data', (data) => {
+				process.stdout.write(data);
+			});
+
+			child.stderr?.on('data', (data) => {
+				process.stderr.write(data);
+			});
+
+			let resolved = false;
+			const handleExit = (code: number | null) => {
+				if (resolved) return;
+				resolved = true;
+				if (code === 0 || (pname === 'mkvmerge' && code === 1)) {
+					resolve({ isOk: true });
+				} else {
+					const error = new Error(`${pname} exited with code ${code}`) as any;
+					error.code = code;
+					resolve({ isOk: false, err: error });
 				}
 			};
-		}
+
+			child.on('exit', handleExit);
+			child.on('close', handleExit);
+
+			child.on('error', (err) => {
+				if (resolved) return;
+				resolved = true;
+				resolve({ isOk: false, err: err as any });
+			});
+		});
 	}
+}
+
+function splitArgs(args: string): string[] {
+	const regex = /("[^"]*"|'[^']*'|\S)+/g;
+	const matches = args.match(regex);
+	if (!matches) return [];
+	return matches.map(arg => arg.replace(/^["']|["']$/g, ''));
 }

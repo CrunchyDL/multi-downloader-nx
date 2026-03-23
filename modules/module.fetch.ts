@@ -25,8 +25,8 @@ type GetDataResponse = {
 	error?: {
 		name: string;
 	} & TypeError & {
-			res?: Response;
-		};
+		res?: Response;
+	};
 };
 
 // function hasDisplay(): boolean {
@@ -73,8 +73,6 @@ export class Req {
 
 		// Debug
 		if (this.debug) {
-			console.debug('[DEBUG] FETCH OPTIONS:');
-			console.debug(options);
 		}
 
 		try {
@@ -129,8 +127,8 @@ export class Req {
 			const error = _error as {
 				name: string;
 			} & TypeError & {
-					res: Response;
-				};
+				res: Response;
+			};
 			if (error.res && error.res.status && error.res.statusText) {
 				console.error(`${error.name} ${error.res.status}: ${error.res.statusText}`);
 			} else {

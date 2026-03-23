@@ -115,7 +115,7 @@ export default class Crunchy implements ServiceClass {
 			const selected = await this.downloadFromSeriesID(argv.series, { ...argv });
 			if (selected.isOk) {
 				for (const select of selected.value) {
-					if (!(await this.downloadEpisode(select, { ...argv, skipsubs: false }, true))) {
+					if (!(await this.downloadEpisode(select, { ...argv, skipsubs: false, threads: argv.threads as number }, true))) {
 						console.error(`Unable to download selected episode ${select.episodeNumber}`);
 						return false;
 					}
@@ -136,14 +136,10 @@ export default class Crunchy implements ServiceClass {
 			await this.logShowListRaw();
 		} else if (argv.s && argv.s.match(/^[0-9A-Z]{9,}$/)) {
 			await this.refreshToken();
-			if (argv.dubLang.length > 1) {
-				console.info('One show can only be downloaded with one dub. Use --srz instead.');
-			}
-			argv.dubLang = [argv.dubLang[0]];
 			const selected = await this.getSeasonById(argv.s, argv.numbers, argv.e, argv.but, argv.all);
 			if (selected.isOk) {
 				for (const select of selected.value) {
-					if (!(await this.downloadEpisode(select, { ...argv, skipsubs: false }))) {
+					if (!(await this.downloadEpisode(select, { ...argv, skipsubs: false, threads: argv.threads as number }))) {
 						console.error(`Unable to download selected episode ${select.episodeNumber}`);
 						return false;
 					}
@@ -152,13 +148,9 @@ export default class Crunchy implements ServiceClass {
 			return true;
 		} else if (argv.e) {
 			await this.refreshToken();
-			if (argv.dubLang.length > 1) {
-				console.info('One show can only be downloaded with one dub. Use --srz instead.');
-			}
-			argv.dubLang = [argv.dubLang[0]];
 			const selected = await this.getObjectById(argv.e, false);
 			for (const select of selected as Partial<CrunchyEpMeta>[]) {
-				if (!(await this.downloadEpisode(select as CrunchyEpMeta, { ...argv, skipsubs: false }))) {
+				if (!(await this.downloadEpisode(select as CrunchyEpMeta, { ...argv, skipsubs: false, threads: argv.threads as number }))) {
 					console.error(`Unable to download selected episode ${select.episodeNumber}`);
 					return false;
 				}
@@ -166,13 +158,9 @@ export default class Crunchy implements ServiceClass {
 			return true;
 		} else if (argv.extid) {
 			await this.refreshToken();
-			if (argv.dubLang.length > 1) {
-				console.info('One show can only be downloaded with one dub. Use --srz instead.');
-			}
-			argv.dubLang = [argv.dubLang[0]];
 			const selected = await this.getObjectById(argv.extid, false, true);
 			for (const select of selected as Partial<CrunchyEpMeta>[]) {
-				if (!(await this.downloadEpisode(select as CrunchyEpMeta, { ...argv, skipsubs: false }))) {
+				if (!(await this.downloadEpisode(select as CrunchyEpMeta, { ...argv, skipsubs: false, threads: argv.threads as number }))) {
 					console.error(`Unable to download selected episode ${select.episodeNumber}`);
 					return false;
 				}
@@ -1098,9 +1086,11 @@ export default class Crunchy implements ServiceClass {
 		};
 
 		//get show info
-		const showInfoReq = await this.req.getData(`${api.content_cms}/seasons/${id}?force_locale=&preferred_audio_language=ja-JP&locale=${this.locale}`, AuthHeaders);
+		const showInfoUrl = `${api.content_cms}/seasons/${id}?force_locale=&preferred_audio_language=ja-JP&locale=${this.locale}`;
+		const showInfoReq = await this.req.getData(showInfoUrl, AuthHeaders);
 		if (!showInfoReq.ok || !showInfoReq.res) {
 			console.error('Show Request FAILED!');
+			if (showInfoReq.error) console.error(showInfoReq.error);
 			return { isOk: false, reason: new Error('Show request failed. No more information provided.') };
 		}
 		const showInfo = await showInfoReq.res.json();
@@ -1202,17 +1192,12 @@ export default class Crunchy implements ServiceClass {
 			const selEpId = isSpecial ? 'S' + epNumList.sp.toString().padStart(epNumLen, '0') : '' + parseInt(epNum, 10).toString().padStart(epNumLen, '0');
 			// set data
 			const images = (item.images?.thumbnail ?? [[{ source: '/notFound.png' }]])[0];
+			const argv = yargs.appArgv(this.cfg.cli);
+			const requestedDubs = (argv.dubLang as string[]) || [];
+			const audioPriority = (argv.audioPriority as string[]) || ['jpn', 'eng', 'spa-ES', 'spa'];
+			
 			const epMeta: CrunchyEpMeta = {
-				data: [
-					{
-						mediaId: item.id,
-						versions: null,
-						lang: langsData.languages.find((a) => a.code == yargs.appArgv(this.cfg.cli).dubLang[0]),
-						isSubbed: item.is_subbed,
-						isDubbed: item.is_dubbed,
-						durationMs: item.duration_ms ?? 0
-					}
-				],
+				data: [],
 				seriesTitle: item.series_title,
 				seasonTitle: item.season_title,
 				episodeNumber: item.episode,
@@ -1223,27 +1208,79 @@ export default class Crunchy implements ServiceClass {
 				e: selEpId,
 				image: images[Math.floor(images.length / 2)].source
 			};
+
+			const addMedia = (mediaId: string, langCode: string, isSub: boolean, isDub: boolean, langObj?: langsData.LanguageItem) => {
+				const lang = langObj || langsData.languages.find((a) => a.code == langCode);
+				if (lang && !epMeta.data.some(m => m.mediaId === mediaId)) {
+					epMeta.data.push({
+						mediaId: mediaId,
+						versions: item.versions || null,
+						lang: lang,
+						isSubbed: isSub,
+						isDubbed: isDub,
+						durationMs: item.duration_ms ?? 0
+					});
+				}
+			};
+
+			if (item.versions && item.versions.length > 0) {
+				// Match requested dubs
+				let foundAnyRequested = false;
+				for (const reqDub of requestedDubs) {
+					if (!reqDub) continue;
+					const langs = langsData.languages.filter(l => l.code === reqDub);
+					if (langs.length === 0) continue;
+					
+					const availableLocales = langs.map(l => l.cr_locale).filter(l => !!l);
+					const version = item.versions.find(v => availableLocales.includes(v.audio_locale));
+					
+					if (version) {
+						const actualLang = langs.find(l => l.cr_locale === version.audio_locale) || langs[0];
+						addMedia(version.media_guid, reqDub as string, version.original, !version.original, actualLang);
+						foundAnyRequested = true;
+					}
+				}
+				// Fallback logic: if none requested found, use priority
+				if (!foundAnyRequested) {
+					for (const prio of audioPriority) {
+						if (!prio) continue;
+						const langs = langsData.languages.filter(l => l.code === prio);
+						if (langs.length === 0) continue;
+						
+						const availableLocales = langs.map(l => l.cr_locale).filter(l => !!l);
+						const version = item.versions.find(v => availableLocales.includes(v.audio_locale));
+						
+						if (version) {
+							const actualLang = langs.find(l => l.cr_locale === version.audio_locale) || langs[0];
+							addMedia(version.media_guid, prio as string, version.original, !version.original, actualLang);
+							break; // Only pick one fallback
+						}
+					}
+				}
+			} else {
+				// Legacy behavior or no versions
+				const langCode = requestedDubs[0] || audioPriority[0] || 'jpn';
+				addMedia(item.id, langCode, item.is_subbed, item.is_dubbed);
+			}
+
 			// Check for streams_link and update playback var if needed
-			if (item.__links__?.streams?.href) {
-				epMeta.data[0].playback = item.__links__.streams.href;
-				if (!item.playback) {
-					item.playback = item.__links__.streams.href;
+			epMeta.data.forEach(m => {
+				if (item.__links__?.streams?.href) {
+					m.playback = item.__links__.streams.href;
 				}
-			}
-			if (item.streams_link) {
-				epMeta.data[0].playback = item.streams_link;
-				if (!item.playback) {
-					item.playback = item.streams_link;
+				if (item.streams_link) {
+					m.playback = item.streams_link;
 				}
-			}
-			if (item.versions) {
-				epMeta.data[0].versions = item.versions;
-			}
+				if (!m.playback && item.playback) {
+					m.playback = item.playback;
+				}
+			});
+
 			// find episode numbers
 			if (
-				(but && item.playback && !doEpsFilter.isSelected([selEpId, item.id])) ||
-				(all && item.playback) ||
-				(!but && doEpsFilter.isSelected([selEpId, item.id]) && !item.isSelected && item.playback)
+				(but && !doEpsFilter.isSelected([selEpId, item.id])) ||
+				(all) ||
+				(!but && doEpsFilter.isSelected([selEpId, item.id]) && !item.isSelected)
 			) {
 				selectedMedia.push(epMeta);
 				item.isSelected = true;
@@ -2423,15 +2460,15 @@ export default class Crunchy implements ServiceClass {
 								if (this.cfg.bin.shaka) {
 									commandBaseVideo = ` --enable_raw_key_decryption ${encryptionKeysVideo?.map((kb) => '--keys key_id=' + kb.kid + ':key=' + kb.key).join(' ')}`;
 									commandBaseAudio = ` --enable_raw_key_decryption ${encryptionKeysAudio?.map((kb) => '--keys key_id=' + kb.kid + ':key=' + kb.key).join(' ')}`;
-									commandVideo = `input="${tempTsFile}.video.enc.m4s",stream=video,output="${tempTsFile}.video.m4s"` + commandBaseVideo;
-									commandAudio = `input="${tempTsFile}.audio.enc.m4s",stream=audio,output="${tempTsFile}.audio.m4s"` + commandBaseAudio;
+									commandVideo = `input=${tempTsFile}.video.enc.m4s,stream=video,output=${tempTsFile}.video.m4s` + commandBaseVideo;
+									commandAudio = `input=${tempTsFile}.audio.enc.m4s,stream=audio,output=${tempTsFile}.audio.m4s` + commandBaseAudio;
 								}
 
 								if (videoDownloaded) {
 									console.info('Started decrypting video,', this.cfg.bin.shaka ? 'using shaka' : 'using mp4decrypt');
-									const decryptVideo = Helper.exec(
+									const decryptVideo = await Helper.exec(
 										this.cfg.bin.shaka ? 'shaka-packager' : 'mp4decrypt',
-										this.cfg.bin.shaka ? `"${this.cfg.bin.shaka}"` : `"${this.cfg.bin.mp4decrypt}"`,
+										(this.cfg.bin.shaka ? this.cfg.bin.shaka : this.cfg.bin.mp4decrypt)!,
 										commandVideo
 									);
 									if (!decryptVideo.isOk) {
@@ -2460,9 +2497,9 @@ export default class Crunchy implements ServiceClass {
 
 								if (audioDownloaded) {
 									console.info('Started decrypting audio,', this.cfg.bin.shaka ? 'using shaka' : 'using mp4decrypt');
-									const decryptAudio = Helper.exec(
+									const decryptAudio = await Helper.exec(
 										this.cfg.bin.shaka ? 'shaka-packager' : 'mp4decrypt',
-										this.cfg.bin.shaka ? `"${this.cfg.bin.shaka}"` : `"${this.cfg.bin.mp4decrypt}"`,
+										(this.cfg.bin.shaka ? this.cfg.bin.shaka : this.cfg.bin.mp4decrypt)!,
 										commandAudio
 									);
 									if (!decryptAudio.isOk) {
@@ -3067,6 +3104,40 @@ export default class Crunchy implements ServiceClass {
 		if (data.some((a) => a.type === 'Audio')) {
 			hasAudioStreams = true;
 		}
+		const argv = yargs.appArgv(this.cfg.cli);
+		const audioPriority = (argv.audioPriority as any as string[]) || ['jpn', 'eng', 'spa-ES', 'spa'];
+		const subtitlePriority = (argv.subtitlePriority as any as string[]) || ['en-US', 'es-419', 'es-ES'];
+
+		let defaultAudio = options.defaultAudio;
+		// Prioritize dubLang for default audio
+		const dubLang = (argv.dubLang as any as string[]) || [];
+		for (const dub of dubLang) {
+			const found = data.find(a => a.type === 'Audio' && (a as any).lang.code === dub);
+			if (found && found.type === 'Audio') {
+				defaultAudio = found.lang;
+				break;
+			}
+		}
+		// Fallback to audioPriority if no dubLang found in data
+		if (!defaultAudio || (defaultAudio.code === 'und' && audioPriority.length > 0)) {
+			for (const prio of audioPriority) {
+				const found = data.find(a => a.type === 'Audio' && (a as any).lang.code === prio);
+				if (found && found.type === 'Audio') {
+					defaultAudio = found.lang;
+					break;
+				}
+			}
+		}
+
+		let defaultSub = options.defaultSub;
+		for (const prio of subtitlePriority) {
+			const found = data.find(a => a.type === 'Subtitle' && ((a as any).language.locale === prio || (a as any).language.cr_locale === prio));
+			if (found && found.type === 'Subtitle') {
+				defaultSub = found.language;
+				break;
+			}
+		}
+
 		const merger = new Merger({
 			onlyVid: hasAudioStreams
 				? data
@@ -3124,11 +3195,13 @@ export default class Crunchy implements ServiceClass {
 			videoTitle: options.videoTitle,
 			options: {
 				ffmpeg: options.ffmpegOptions,
-				mkvmerge: options.mkvmergeOptions
+				mkvmerge: options.mkvmergeOptions,
+				threads: options.threads,
+				preset: options.preset
 			},
 			defaults: {
-				audio: options.defaultAudio,
-				sub: options.defaultSub
+				audio: defaultAudio,
+				sub: defaultSub
 			},
 			ccTag: options.ccTag
 		});
