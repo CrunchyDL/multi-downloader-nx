@@ -148,36 +148,59 @@ const loadBinCfg = async () => {
 	const binCfg = loadYamlCfgFile<ConfigObject['bin']>(binCfgFile);
 	// binaries
 	const defaultBin = {
-		ffmpeg: 'ffmpeg',
-		mkvmerge: 'mkvmerge',
-		mp4decrypt: 'mp4decrypt',
-		shaka: 'shaka-packager'
+		ffmpeg: ['ffmpeg'],
+		mkvmerge: ['mkvmerge'],
+		mp4decrypt: ['mp4decrypt'],
+		shaka: ['shaka-packager', 'packager-win-x64']
 	};
 	const keys = Object.keys(defaultBin) as (keyof typeof defaultBin)[];
 	for (const dir of keys) {
-		if (!Object.prototype.hasOwnProperty.call(binCfg, dir) || typeof binCfg[dir] != 'string') {
-			binCfg[dir] = defaultBin[dir];
-		}
+		const alternatives = defaultBin[dir];
 		
-		// Remove .exe extension if on Linux/Docker and it was mounted from Windows config
-		if (process.platform !== 'win32' && (binCfg[dir] as string).toLowerCase().endsWith('.exe')) {
-			binCfg[dir] = (binCfg[dir] as string).slice(0, -4);
+		// 1. Try configured path from bin-path.yml
+		if (Object.prototype.hasOwnProperty.call(binCfg, dir) && typeof binCfg[dir] === 'string') {
+			let cfgPath = binCfg[dir] as string;
+			if (process.platform !== 'win32' && cfgPath.toLowerCase().endsWith('.exe')) {
+				cfgPath = cfgPath.slice(0, -4);
+			}
+			if (cfgPath.match(/^\${wdir}/)) {
+				cfgPath = path.join(workingDir, cfgPath.replace(/^\${wdir}/, ''));
+			}
+			if (!path.isAbsolute(cfgPath)) {
+				cfgPath = path.join(workingDir, cfgPath);
+			}
+			binCfg[dir] = await lookpath(cfgPath);
 		}
 
-		if ((binCfg[dir] as string).match(/^\${wdir}/)) {
-			binCfg[dir] = (binCfg[dir] as string).replace(/^\${wdir}/, '');
-			binCfg[dir] = path.join(workingDir, binCfg[dir] as string);
-		}
-		if (!path.isAbsolute(binCfg[dir] as string)) {
-			binCfg[dir] = path.join(workingDir, binCfg[dir] as string);
-		}
-		binCfg[dir] = await lookpath(binCfg[dir] as string);
-		binCfg[dir] = binCfg[dir] ? binCfg[dir] : undefined;
+		// 2. If not found or not configured, try alternatives in PATH and various possible directories
 		if (!binCfg[dir]) {
-			const binFile = await lookpath(path.basename(defaultBin[dir]));
-			binCfg[dir] = binFile ? binFile : binCfg[dir];
+			for (const alt of alternatives) {
+				// A. Try PATH
+				let found = await lookpath(alt);
+				if (found) {
+					binCfg[dir] = found;
+					break;
+				}
+				// B. Try local directories (for Windows executables)
+				if (process.platform === 'win32') {
+					const searchDirs = [
+						workingDir,
+						path.join(workingDir, '..'),       // backend
+						path.join(workingDir, '..', '..')  // project root
+					];
+					for (const sDir of searchDirs) {
+						const binaryPath = path.join(sDir, `${alt}.exe`);
+						if (fs.existsSync(binaryPath)) {
+							binCfg[dir] = binaryPath;
+							break;
+						}
+					}
+					if (binCfg[dir]) break;
+				}
+			}
 		}
 	}
+	return binCfg;
 	return binCfg;
 };
 
