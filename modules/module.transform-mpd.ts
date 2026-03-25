@@ -115,7 +115,7 @@ export async function parse(manifest: string, language?: LanguageItem, url?: str
 
 			//Find and add audio language if it is found in the MPD
 			let audiolang: LanguageItem;
-			const foundlanguage = findLang(languages.find((a) => a.code === item.language)?.cr_locale ?? 'unknown');
+			const foundlanguage = findLang(languages.find((a) => a.code === item.language || a.locale === item.language)?.cr_locale ?? 'unknown');
 			if (item.language) {
 				audiolang = foundlanguage;
 			} else {

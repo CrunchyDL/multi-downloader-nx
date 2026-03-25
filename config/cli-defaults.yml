@@ -40,3 +40,4 @@ metadataProviders:
   - tvdb
 scanConcurrency: 4
 threads: 0
+defaultSub: es-ES

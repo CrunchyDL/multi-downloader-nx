@@ -1038,7 +1038,7 @@ const args: TAppArg<boolean | number | string | unknown[]>[] = [
 			default: 'eng'
 		},
 		transformer: (val) => {
-			const item = languages.find((a) => a.code === val);
+			const item = languages.find((a) => a.code === val || a.locale === val);
 			if (!item) {
 				throw new Error(`Unable to find language code ${val}!`);
 			}
@@ -1057,7 +1057,7 @@ const args: TAppArg<boolean | number | string | unknown[]>[] = [
 			default: 'eng'
 		},
 		transformer: (val) => {
-			const item = languages.find((a) => a.code === val);
+			const item = languages.find((a) => a.code === val || a.locale === val);
 			if (!item) {
 				throw new Error(`Unable to find language code ${val}!`);
 			}
