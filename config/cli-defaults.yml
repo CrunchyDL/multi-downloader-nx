@@ -7,12 +7,13 @@ dlVideoOnce: false
 keepAllVideos: false
 fileName: '[${service}] ${showTitle} - S${season}E${episode} [${height}p]'
 dubLang:
-  - jpn
-  - spa
   - spa-ES
+  - spa
+  - jpn
 dlsubs:
-  - es-419
   - es-ES
+  - es-419
+  - en-US
 defaultAudio: spa-ES
 vstream: androidtv
 astream: android
@@ -29,6 +30,7 @@ audioPriority:
 subtitlePriority:
   - es-ES
   - es-419
+  - en-US
   - none
 x265Preset: none
 encodingPreset: h265_1080p24
@@ -38,6 +40,6 @@ metadataProviders:
   - crunchy
   - anidb
   - tvdb
-scanConcurrency: 4
+scanConcurrency: 1
 threads: 0
 defaultSub: es-ES
