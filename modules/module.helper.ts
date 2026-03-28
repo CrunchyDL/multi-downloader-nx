@@ -27,14 +27,15 @@ export default class Helper {
 		/* eslint-disable no-useless-escape, no-control-regex */
 		// Smart Replacer
 		const rep: Record<string, string> = {
-			'/': '⧸',
-			'\\': '⧹',
-			':': '：',
+			'/': '_',
+			'\\': '_',
+			':': '_',
 			'*': '∗',
 			'?': '？',
 			'"': "'",
 			'<': '‹',
-			'>': '›'
+			'>': '›',
+			'|': '_'
 		};
 		n = n.replace(/[\/\\:\*\?"<>\|]/g, (ch) => rep[ch] || '_');
 
@@ -63,11 +64,7 @@ export default class Helper {
 			};
 			
 			let child: childProcess.ChildProcess;
-			if (process.platform === 'win32') {
-				child = childProcess.spawn('powershell.exe', ['-Command', `& "${fpath}"${fullCommand}`], options);
-			} else {
-				child = childProcess.spawn(fpath, pargs ? splitArgs(pargs) : [], options);
-			}
+			child = childProcess.spawn(fpath, pargs ? splitArgs(pargs) : [], options);
 
 			child.stdout?.on('data', (data) => {
 				process.stdout.write(data);
@@ -103,8 +100,8 @@ export default class Helper {
 }
 
 function splitArgs(args: string): string[] {
-	const regex = /("[^"]*"|'[^']*'|\S)+/g;
+	const regex = /("[^"]*"|'[^']*'|[^'"\s]+)+/g;
 	const matches = args.match(regex);
 	if (!matches) return [];
-	return matches.map(arg => arg.replace(/^["']|["']$/g, ''));
+	return matches.map(arg => arg.replace(/["'](.*?)["']/g, '$1'));
 }

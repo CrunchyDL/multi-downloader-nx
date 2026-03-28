@@ -33,7 +33,7 @@ subtitlePriority:
   - en-US
   - none
 x265Preset: none
-encodingPreset: h265_1080p24
+encodingPreset: h265_1080p24_high_crf
 metadataProviders:
   - anilist
   - tmdb

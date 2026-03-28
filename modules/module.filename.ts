@@ -43,7 +43,10 @@ const parseFileName = (input: string, variables: Variable[], numbers: number, ov
 			input = input.replace(type, use.replaceWith);
 		}
 	}
-	return input.split(path.sep).map((a) => Helper.cleanupFilename(a));
+	return input.split(/[\\\/]/).map((a, i) => {
+		if (i === 0 && (a.endsWith(':') || a === '')) return a;
+		return Helper.cleanupFilename(a);
+	});
 };
 
 const parseOverride = (variables: Variable[], override: string[]): Variable<string>[] => {

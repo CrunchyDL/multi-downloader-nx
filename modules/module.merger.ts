@@ -66,29 +66,38 @@ class Merger {
 		if (this.options.videoTitle) this.options.videoTitle = this.options.videoTitle.replace(/"/g, "'");
 	}
 
+	public static async getFileDuration(fpath: string): Promise<number | undefined> {
+		try {
+			const file = await fsp.open(fpath);
+			const { size } = await fsp.stat(fpath);
+
+			// Mediainfo
+			const mediaInfo = await mediaInfoFactory();
+			const result = await mediaInfo.analyzeData(
+				() => size,
+				async (size, offset) => {
+					const buf = Buffer.alloc(size);
+					const { bytesRead } = await file.read(buf, 0, size, offset);
+					return buf.subarray(0, bytesRead);
+				}
+			);
+			await file.close();
+
+			const videoInfo = result?.media?.track?.filter((stream) => stream['@type'] == 'Video' || stream['@type'] == 'Audio');
+			return videoInfo?.[0]?.Duration;
+		} catch (e) {
+			console.error(`[Merger] Failed to get duration for ${fpath}:`, e);
+			return undefined;
+		}
+	}
+
 	public async createDelays() {
 		//Don't bother scanning it if there is only 1 vna stream
 		if (this.options.videoAndAudio.length > 1) {
 			const vnas = this.options.videoAndAudio;
 			//get and set durations on each videoAndAudio Stream
 			for (const [vnaIndex, vna] of vnas.entries()) {
-				const file = await fsp.open(vna.path);
-				const { size } = await fsp.stat(vna.path);
-
-				// Mediainfo
-				const mediaInfo = await mediaInfoFactory();
-				const result = await mediaInfo.analyzeData(
-					() => size,
-					async (size, offset) => {
-						const buf = Buffer.alloc(size);
-						const { bytesRead } = await file.read(buf, 0, size, offset);
-						return buf.subarray(0, bytesRead);
-					}
-				);
-				await file.close();
-
-				const videoInfo = result?.media?.track?.filter((stream) => stream['@type'] == 'Video');
-				vnas[vnaIndex].duration = videoInfo?.[0].Duration;
+				vnas[vnaIndex].duration = await Merger.getFileDuration(vna.path);
 			}
 			//Sort videoAndAudio streams by duration (shortest first)
 			vnas.sort((a, b) => {
@@ -133,7 +142,7 @@ class Merger {
 			if (vid.delay && hasVideo) {
 				args.push(`-itsoffset -${Math.ceil(vid.delay * 1000)}ms`);
 			}
-			args.push(`-i "${vid.path}"`);
+			args.push('-i', `"${vid.path}"`);
 			if (!hasVideo || this.options.keepAllVideos) {
 				metaData.push(`-map ${index}:a -map ${index}:v`);
 				metaData.push(`-metadata:s:a:${audioIndex} language=${vid.lang.code}`);
@@ -149,7 +158,7 @@ class Merger {
 
 		for (const vid of this.options.onlyVid) {
 			if (!hasVideo || this.options.keepAllVideos) {
-				args.push(`-i "${vid.path}"`);
+				args.push('-i', `"${vid.path}"`);
 				metaData.push(`-map ${index} -map -${index}:a`);
 				metaData.push(`-metadata:s:v:${index} title="${this.options.videoTitle}"`);
 				hasVideo = true;
@@ -158,7 +167,7 @@ class Merger {
 		}
 
 		for (const aud of this.options.onlyAudio) {
-			args.push(`-i "${aud.path}"`);
+			args.push('-i', `"${aud.path}"`);
 			metaData.push(`-map ${index}`);
 			metaData.push(`-metadata:s:a:${audioIndex} language=${aud.lang.code}`);
 			index++;
@@ -170,21 +179,21 @@ class Merger {
 			if (sub.delay) {
 				args.push(`-itsoffset -${Math.ceil(sub.delay * 1000)}ms`);
 			}
-			args.push(`-i "${sub.file}"`);
+			args.push('-i', `"${sub.file}"`);
 		}
 
 		if (this.options.chapters && this.options.chapters.length > 0) {
 			const chapterFilePath = this.options.chapters[0].path;
 			const chapterData = convertChaptersToFFmpegFormat(this.options.chapters[0].path);
 			fs.writeFileSync(chapterFilePath, chapterData, 'utf-8');
-			args.push(`-i "${chapterFilePath}" -map_metadata 1`);
+			args.push('-i', `"${chapterFilePath}"`, '-map_metadata 1');
 		}
 
 		if (this.options.output.split('.').pop() === 'mkv') {
 			if (this.options.fonts) {
 				let fontIndex = 0;
 				for (const font of this.options.fonts) {
-					args.push(`-attach ${font.path} -metadata:s:t:${fontIndex} mimetype=${font.mime} -metadata:s:t:${fontIndex} filename=${font.name}`);
+					args.push('-attach', `"${font.path}"`, `-metadata:s:t:${fontIndex}`, `mimetype=${font.mime}`, `-metadata:s:t:${fontIndex}`, `filename="${font.name}"`);
 					fontIndex++;
 				}
 			}
@@ -441,6 +450,17 @@ class Merger {
 		const outputDir = path.dirname(this.options.output);
 		if (!fs.existsSync(outputDir)) {
 			fs.mkdirSync(outputDir, { recursive: true });
+		}
+
+		// Try to find a duration to log for progress tracking
+		const primaryVid = this.options.videoAndAudio.find(v => v.isPrimary) || this.options.videoAndAudio[0] || this.options.onlyVid[0];
+		if (primaryVid) {
+			if (!primaryVid.duration) {
+				primaryVid.duration = await Merger.getFileDuration(primaryVid.path);
+			}
+			if (primaryVid.duration) {
+				console.info(`[Merger] Total duration: ${primaryVid.duration}s`);
+			}
 		}
 
 		console.info(`[${type}] Started merging`);

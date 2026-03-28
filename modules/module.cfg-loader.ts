@@ -112,7 +112,7 @@ const loadCfg = (): ConfigObject => {
 	};
 	const defaultDirs = {
 		fonts: '${wdir}/fonts/',
-		content: '${wdir}/videos/',
+		content: process.env.CONTENT_DIR || process.env.DOWNLOAD_DIR || '${wdir}/videos/',
 		trash: '${wdir}/videos/_trash/',
 		config: '${wdir}/config'
 	};
